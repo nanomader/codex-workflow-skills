@@ -1,0 +1,4 @@
+interface:
+  display_name: "Anti-Hivemind Prompt Rewriter"
+  short_description: "Rewrite prompts to escape generic LLM mode"
+  default_prompt: "Use $anti-hivemind-prompt-rewriter to rewrite this prompt so it avoids generic LLM defaults while preserving my goal and constraints: [paste prompt]."

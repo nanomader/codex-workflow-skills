@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Codex Review"
+  short_description: "Run local code review from explicit git diff context and save findings."
+  default_prompt: "Review my local changes with this skill. Context: <describe the change briefly>."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Decision Gap Scout"
+  short_description: "Find the highest-value unresolved planning decisions"
+  default_prompt: "Read the current planning docs and list the most important unresolved decisions or questions that should be settled before implementation planning."
