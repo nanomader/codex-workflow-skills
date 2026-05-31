@@ -59,11 +59,13 @@ If the next step is deciding whether a finding is real, hand it off to
 
 ## Helper Script
 
-Run the helper relative to this repository root:
+Run the helper from the target GitHub repository so `gh` resolves the intended
+repo. Resolve the script path from the installed skill or from this public
+checkout:
 
 ```bash
-python3 pr-codex-review-poll/scripts/pr_codex_review_poll.py snapshot --pr <number>
-python3 pr-codex-review-poll/scripts/pr_codex_review_poll.py poll --pr <number> --head-sha <sha> --interval 30 --timeout 1800
+python3 <skills-checkout>/pr-codex-review-poll/scripts/pr_codex_review_poll.py snapshot --pr <number>
+python3 <skills-checkout>/pr-codex-review-poll/scripts/pr_codex_review_poll.py poll --pr <number> --head-sha <sha> --interval 30 --timeout 1800
 ```
 
 If the current working directory is the skill directory itself, use:

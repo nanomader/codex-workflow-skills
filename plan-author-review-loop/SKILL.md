@@ -63,11 +63,14 @@ Default to in-band fresh-eyes review. Escalate only when the change needs it:
 When AI plan review is justified, use the bundled wrapper:
 
 ```bash
-plan-author-review-loop/scripts/plan_review.sh \
+<skills-checkout>/plan-author-review-loop/scripts/plan_review.sh \
   --plan-file <PLAN.md> \
   --blocking-only \
   --context-text "Short change context and review focus."
 ```
+
+Run the wrapper from the target git repository. Resolve `<skills-checkout>` from
+the installed skill location or this public checkout.
 
 Wrapper defaults:
 

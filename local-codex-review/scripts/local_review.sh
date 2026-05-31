@@ -20,6 +20,7 @@ tmp_root="${TMPDIR:-/tmp}"
 tmp_root="${tmp_root%/}"
 raw_output_file=""
 stderr_file=""
+prompt_input_file=""
 timeout_seconds="${CODEX_LOCAL_REVIEW_TIMEOUT_SECONDS:-900}"
 heartbeat_seconds="${CODEX_LOCAL_REVIEW_HEARTBEAT_SECONDS:-20}"
 max_patch_bytes="${CODEX_LOCAL_REVIEW_MAX_PATCH_BYTES:-500000}"
@@ -364,11 +365,13 @@ build_full_prompt() {
 }
 
 run_codex_exec() {
-  local full_prompt="$1"
+  local prompt_path="$1"
   shift
 
-  python3 - "$timeout_seconds" "$heartbeat_seconds" "$raw_output_file" "$stderr_file" "$@" "$full_prompt" <<'PY'
+  python3 - "$timeout_seconds" "$heartbeat_seconds" "$raw_output_file" "$stderr_file" "$prompt_path" "$@" <<'PY'
+import os
 import pathlib
+import signal
 import subprocess
 import sys
 import threading
@@ -378,7 +381,9 @@ timeout = int(sys.argv[1])
 heartbeat_seconds = int(sys.argv[2])
 stdout_path = pathlib.Path(sys.argv[3])
 stderr_path = pathlib.Path(sys.argv[4])
-cmd = sys.argv[5:]
+prompt_path = pathlib.Path(sys.argv[5])
+cmd = sys.argv[6:]
+prompt_text = prompt_path.read_text(encoding="utf-8")
 
 start = time.monotonic()
 last_activity = start
@@ -387,16 +392,44 @@ stdout_chunks = []
 stderr_chunks = []
 proc = subprocess.Popen(
     cmd,
+    stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
     text=True,
     bufsize=1,
+    start_new_session=True,
 )
+
+def terminate_process_group(sig, grace_seconds=2):
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, sig)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+
+def persist_streams():
+    stdout_path.write_text("".join(stdout_chunks), encoding="utf-8")
+    stderr_path.write_text("".join(stderr_chunks), encoding="utf-8")
 
 def finalize_streams():
     # Do not let reader-thread teardown block the wrapper indefinitely.
+    stdin_thread.join(timeout=2)
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
+
+def exit_after_cleanup(status):
+    finalize_streams()
+    persist_streams()
+    raise SystemExit(status)
 
 def pump_stream(stream, sink, label):
     global last_activity
@@ -408,6 +441,19 @@ def pump_stream(stream, sink, label):
             print(f"[codex {label}] {stripped}", file=sys.stderr, flush=True)
     stream.close()
 
+def write_stdin():
+    try:
+        proc.stdin.write(prompt_text)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    except Exception:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+
+stdin_thread = threading.Thread(target=write_stdin, daemon=True)
 stdout_thread = threading.Thread(
     target=pump_stream,
     args=(proc.stdout, stdout_chunks, "stdout"),
@@ -418,40 +464,45 @@ stderr_thread = threading.Thread(
     args=(proc.stderr, stderr_chunks, "stderr"),
     daemon=True,
 )
+stdin_thread.start()
 stdout_thread.start()
 stderr_thread.start()
 
-while True:
-    now = time.monotonic()
-    elapsed = time.monotonic() - start
-    remaining = timeout - elapsed
-    if remaining <= 0:
-        proc.kill()
-        proc.wait()
-        finalize_streams()
-        stdout_path.write_text("".join(stdout_chunks), encoding="utf-8")
-        stderr_path.write_text("".join(stderr_chunks), encoding="utf-8")
-        raise SystemExit(124)
+def handle_signal(signum, _frame):
+    terminate_process_group(signal.SIGTERM, grace_seconds=1)
+    exit_after_cleanup(128 + signum)
 
-    status = proc.poll()
-    if status is not None:
-        proc.wait()
-        finalize_streams()
-        stdout_path.write_text("".join(stdout_chunks), encoding="utf-8")
-        stderr_path.write_text("".join(stderr_chunks), encoding="utf-8")
-        raise SystemExit(status)
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
 
-    if proc.poll() is None and (now - last_heartbeat) >= heartbeat_seconds:
-        print(
-            "Codex review still running "
-            f"({int(time.monotonic() - start)}s elapsed, "
-            f"{int(time.monotonic() - last_activity)}s since last child output)...",
-            file=sys.stderr,
-            flush=True,
-        )
-        last_heartbeat = now
+try:
+    while True:
+        now = time.monotonic()
+        elapsed = time.monotonic() - start
+        remaining = timeout - elapsed
+        if remaining <= 0:
+            terminate_process_group(signal.SIGTERM)
+            exit_after_cleanup(124)
 
-    time.sleep(min(1, max(0.1, remaining)))
+        status = proc.poll()
+        if status is not None:
+            proc.wait()
+            exit_after_cleanup(status)
+
+        if proc.poll() is None and (now - last_heartbeat) >= heartbeat_seconds:
+            print(
+                "Codex review still running "
+                f"({int(time.monotonic() - start)}s elapsed, "
+                f"{int(time.monotonic() - last_activity)}s since last child output)...",
+                file=sys.stderr,
+                flush=True,
+            )
+            last_heartbeat = now
+
+        time.sleep(min(1, max(0.1, remaining)))
+except KeyboardInterrupt:
+    terminate_process_group(signal.SIGTERM, grace_seconds=1)
+    exit_after_cleanup(130)
 PY
 }
 
@@ -761,6 +812,7 @@ build_debug_paths
 
 raw_output_file=$(make_temp_file "local-codex-review-output")
 stderr_file=$(make_temp_file "local-codex-review-stderr")
+prompt_input_file=$(make_temp_file "local-codex-review-prompt")
 
 cleanup() {
   if [[ -n "$raw_output_file" && -f "$raw_output_file" ]]; then
@@ -768,6 +820,9 @@ cleanup() {
   fi
   if [[ -n "$stderr_file" && -f "$stderr_file" ]]; then
     rm -f "$stderr_file"
+  fi
+  if [[ -n "$prompt_input_file" && -f "$prompt_input_file" ]]; then
+    rm -f "$prompt_input_file"
   fi
 }
 
@@ -810,7 +865,7 @@ else
   fi
 
   log_phase "Building bounded review prompt."
-  full_prompt=$(build_full_prompt)
+  build_full_prompt >"$prompt_input_file"
 
   CODEX_LOCAL_REVIEW_SANDBOX="${CODEX_LOCAL_REVIEW_SANDBOX:-read-only}"
   CODEX_LOCAL_REVIEW_MODEL="${CODEX_LOCAL_REVIEW_MODEL:-}"
@@ -836,7 +891,7 @@ else
     "$CODEX_LOCAL_REVIEW_REASONING" \
     "$CODEX_LOCAL_REVIEW_SANDBOX" >&2
   printf '[local-review] Heartbeat interval: %ss. Findings path: %s\n' "$heartbeat_seconds" "$findings_out" >&2
-  if run_codex_exec "$full_prompt" "${cmd[@]}"; then
+  if run_codex_exec "$prompt_input_file" "${cmd[@]}"; then
     :
   else
     status=$?

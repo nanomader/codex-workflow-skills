@@ -69,10 +69,11 @@ shared helper, fixture redesign, or contract clarification.
 
 ## Commands
 
-Run from this repository root, where `local-codex-review/` is present:
+Run from the target git repository. Resolve the script path from the installed
+skill or from this public checkout:
 
 ```bash
-local-codex-review/scripts/local_review.sh \
+<skills-checkout>/local-codex-review/scripts/local_review.sh \
   --uncommitted \
   --blocking-only \
   --context-text "Review this refactor for regressions in fallback behavior."
@@ -81,7 +82,7 @@ local-codex-review/scripts/local_review.sh \
 Branch diff against `origin/main`:
 
 ```bash
-local-codex-review/scripts/local_review.sh \
+<skills-checkout>/local-codex-review/scripts/local_review.sh \
   --base-ref origin/main \
   --blocking-only \
   --context-text "Review this branch for missing tests and behavioral regressions." \
@@ -91,7 +92,7 @@ local-codex-review/scripts/local_review.sh \
 Tracked changes only, with JSON to stdout for another script:
 
 ```bash
-local-codex-review/scripts/local_review.sh \
+<skills-checkout>/local-codex-review/scripts/local_review.sh \
   --tracked-head \
   --print-json \
   --findings-out /tmp/local-review-findings.md \
@@ -101,7 +102,7 @@ local-codex-review/scripts/local_review.sh \
 Specific commit:
 
 ```bash
-local-codex-review/scripts/local_review.sh \
+<skills-checkout>/local-codex-review/scripts/local_review.sh \
   --commit abc1234 \
   --context-text "Check for missing tests and behavioral regressions."
 ```

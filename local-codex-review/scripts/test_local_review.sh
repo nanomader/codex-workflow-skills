@@ -39,6 +39,7 @@ apply_patch_disabled="false"
 fast_tier_enabled="false"
 medium_reasoning_enabled="false"
 profile_value="none"
+prompt_arg_seen="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,13 +69,31 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
+      if [[ "$1" == *"# Review target"* ]]; then
+        prompt_arg_seen="true"
+      fi
       shift
       ;;
   esac
 done
 
-if [[ "$schema_seen" != "true" || "$shell_disabled" != "true" || "$apply_patch_disabled" != "true" || "$fast_tier_enabled" != "true" || "$medium_reasoning_enabled" != "true" || "$profile_value" != "none" ]]; then
-  echo "missing bounded-review arguments" >&2
+if [[ "$mode" == "stdin_block" ]]; then
+  if [[ "$schema_seen" != "true" || "$shell_disabled" != "true" || "$apply_patch_disabled" != "true" || "$fast_tier_enabled" != "true" || "$medium_reasoning_enabled" != "true" || "$profile_value" != "none" || "$prompt_arg_seen" != "false" ]]; then
+    echo "missing bounded-review arguments" >&2
+    exit 91
+  fi
+  sleep 30
+  exit 0
+fi
+
+prompt_text="$(cat)"
+stdin_prompt_seen="false"
+if [[ "$prompt_text" == *"# Review target"* && "$prompt_text" == *"# Patch diff"* && "$prompt_text" == *"example.txt"* ]]; then
+  stdin_prompt_seen="true"
+fi
+
+if [[ "$schema_seen" != "true" || "$shell_disabled" != "true" || "$apply_patch_disabled" != "true" || "$fast_tier_enabled" != "true" || "$medium_reasoning_enabled" != "true" || "$profile_value" != "none" || "$prompt_arg_seen" != "false" || "$stdin_prompt_seen" != "true" ]]; then
+  echo "missing bounded-review arguments or stdin prompt" >&2
   exit 91
 fi
 
@@ -92,6 +111,15 @@ case "$mode" in
     printf '%s\n' '{"summary":"recovered review","findings":[]}'
     echo "synthetic stderr" >&2
     exit 7
+    ;;
+  timeout_child)
+    if [[ -z "${FAKE_CODEX_CHILD_PID_FILE:-}" ]]; then
+      echo "missing FAKE_CODEX_CHILD_PID_FILE" >&2
+      exit 95
+    fi
+    (sleep 30) &
+    printf '%s\n' "$!" >"$FAKE_CODEX_CHILD_PID_FILE"
+    wait "$!"
     ;;
   *)
     echo "unknown FAKE_CODEX_MODE=$mode" >&2
@@ -200,9 +228,105 @@ run_blocking_only_case() {
   assert_contains "$stderr_path" "Minimum severity: P2"
 }
 
+run_timeout_kills_process_group_case() {
+  local stdout_path="$tmp_root/timeout.stdout"
+  local stderr_path="$tmp_root/timeout.stderr"
+  local findings_path="$tmp_root/timeout-findings.md"
+  local child_pid_path="$tmp_root/child.pid"
+
+  set +e
+  (
+    cd "$repo_dir"
+    CODEX_LOCAL_REVIEW_CODEX_BIN="$fake_codex" \
+    CODEX_LOCAL_REVIEW_TIMEOUT_SECONDS=1 \
+    FAKE_CODEX_MODE=timeout_child \
+    FAKE_CODEX_CHILD_PID_FILE="$child_pid_path" \
+    "$review_script" --tracked-head --findings-out "$findings_path"
+  ) >"$stdout_path" 2>"$stderr_path"
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 124 ]]; then
+    echo "Expected timeout exit 124, got $status" >&2
+    exit 1
+  fi
+
+  assert_contains "$stderr_path" "timed out after 1 seconds"
+  if [[ ! -s "$child_pid_path" ]]; then
+    echo "Expected fake child pid file" >&2
+    exit 1
+  fi
+  sleep 1
+  if kill -0 "$(cat "$child_pid_path")" 2>/dev/null; then
+    echo "Expected timeout to terminate fake Codex child process group" >&2
+    exit 1
+  fi
+}
+
+run_stdin_backpressure_timeout_case() {
+  python3 - "$review_script" "$repo_dir" "$fake_codex" "$tmp_root" <<'PY'
+import os
+import pathlib
+import signal
+import subprocess
+import sys
+import time
+
+review_script = pathlib.Path(sys.argv[1])
+repo_dir = pathlib.Path(sys.argv[2])
+fake_codex = pathlib.Path(sys.argv[3])
+tmp_root = pathlib.Path(sys.argv[4])
+
+(repo_dir / "example.txt").write_text("base\n" + ("x" * 1_000_000) + "\n", encoding="utf-8")
+
+stdout_path = tmp_root / "stdin-block.stdout"
+stderr_path = tmp_root / "stdin-block.stderr"
+findings_path = tmp_root / "stdin-block-findings.md"
+
+env = os.environ.copy()
+env.update(
+    {
+        "CODEX_LOCAL_REVIEW_CODEX_BIN": str(fake_codex),
+        "CODEX_LOCAL_REVIEW_MAX_PATCH_BYTES": "0",
+        "CODEX_LOCAL_REVIEW_TIMEOUT_SECONDS": "1",
+        "FAKE_CODEX_MODE": "stdin_block",
+    }
+)
+
+with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
+    proc = subprocess.Popen(
+        [str(review_script), "--tracked-head", "--findings-out", str(findings_path)],
+        cwd=repo_dir,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        start_new_session=True,
+        text=True,
+    )
+    try:
+        status = proc.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        raise SystemExit("wrapper did not enforce timeout while child ignored stdin")
+
+if status != 124:
+    raise SystemExit(f"expected timeout exit 124, got {status}")
+
+stderr_text = stderr_path.read_text(encoding="utf-8")
+if "timed out after 1 seconds" not in stderr_text:
+    raise SystemExit("missing timeout message for stdin backpressure case")
+
+time.sleep(1)
+if proc.poll() is None:
+    raise SystemExit("wrapper process still running after timeout")
+PY
+}
+
 run_valid_case
 run_invalid_case
 run_recovery_case
 run_blocking_only_case
+run_timeout_kills_process_group_case
+run_stdin_backpressure_timeout_case
 
 printf 'local_review.sh tests passed\n'

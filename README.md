@@ -3,6 +3,10 @@
 Reusable Codex skills for repository workflows: prompt rewriting, bug triage,
 decision scouting, local review, implementation planning, and PR review polling.
 
+The skills are intended to run against any suitable target repository. Script
+examples use paths from this checkout, but the working directory should be the
+target git or GitHub repository unless a skill says otherwise.
+
 ## Skills
 
 - `anti-hivemind-prompt-rewriter`: rewrites prompts so they produce less
@@ -32,3 +36,15 @@ decision scouting, local review, implementation planning, and PR review polling.
 
 MIT. You can use, modify, distribute, and sell work based on these skills as
 long as the license notice is preserved.
+
+## Tests
+
+Run the local validation suite from this checkout:
+
+```bash
+scripts/test_all.sh
+```
+
+The suite uses fake Codex binaries for wrapper behavior and pytest for the
+PR review poller unit tests. It requires `bash`, `git`, `jq`, `python3`, and
+`pytest`.
