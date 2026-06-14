@@ -54,6 +54,24 @@ content, writes findings to an artifact, and returns structured findings.
 - The wrapper fails fast when the patch payload exceeds
   `CODEX_LOCAL_REVIEW_MAX_PATCH_BYTES` or `--max-patch-bytes`.
 
+## Diff Packet
+
+This skill is useful because the model receives a bounded review packet instead
+of an open-ended repo session. The packet includes:
+
+- target mode: uncommitted, tracked diff, branch diff, or commit;
+- branch, base ref, or commit metadata;
+- changed file list;
+- patch body;
+- caller-supplied context text;
+- excluded paths;
+- severity floor;
+- JSON output schema;
+- findings output path.
+
+The review output is a signal for triage and validation. It is not proof that
+the patch is correct.
+
 ## Severity Notes
 
 - The shared schema emits `P1`, `P2`, `P3`, and `LOW`.

@@ -43,6 +43,23 @@ Optional:
 - Pick the cheapest review intensity that preserves quality and state the
   selected tier in the final summary.
 
+## Fit In The Lane Workflow
+
+This skill owns the slice plan, not the implementation. In a larger lane, use it
+after the lane file has selected one current slice and before any code changes.
+
+The plan should make the slice small enough to review directly by naming:
+
+- one primary invariant or support boundary;
+- one canonical owner or source of truth;
+- concrete files expected to change;
+- no-touch boundaries;
+- deterministic tests and checks;
+- review-churn stop conditions.
+
+If the user provides only a broad lane or metaplan, produce a planning update or
+slice-selection recommendation before writing an implementation-ready plan.
+
 ## Review Intensity
 
 Default to in-band fresh-eyes review. Escalate only when the change needs it:

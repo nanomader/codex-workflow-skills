@@ -1,0 +1,15 @@
+{
+  "pr": 42,
+  "head_sha": "1111111111111111111111111111111111111111",
+  "status": "findings",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "Duplicate detection misses non-adjacent keys",
+      "path": "tests/test_config_parser.py",
+      "line": 42,
+      "url": "https://example.invalid/review/comment/1"
+    }
+  ],
+  "note": "Example artifact only. This is not real GitHub output."
+}

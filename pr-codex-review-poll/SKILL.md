@@ -52,6 +52,19 @@ If the next step is deciding whether a finding is real, hand it off to
   - `P3`, `LOW` => non-blocking
   - unknown/unparsed => blocking
 
+## Not A Fixer
+
+This skill reads GitHub Codex review state and stops. It does not decide whether
+a finding is correct, edit files, reply on GitHub, resolve threads, or post a
+new review request.
+
+Keep these steps separate:
+
+1. poll review output for the exact current head;
+2. triage findings that need validation;
+3. implement fixes in the owning implementation workflow;
+4. request a new head-scoped review only after a new PR head exists.
+
 ## Required Tools
 
 - authenticated `gh`
